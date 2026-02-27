@@ -1,0 +1,39 @@
+name: Update README with Projects
+
+on:
+  schedule:
+    - cron: '0 */12 * * *' # Every 12 hours
+  workflow_dispatch: # Manual trigger
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch projects
+        run: |
+          RESPONSE=$(curl -sf "${{ secrets.PROJECTS_API_URL }}")
+          if [ -z "$RESPONSE" ]; then
+            echo "Failed to fetch projects"
+            exit 1
+          fi
+          echo "$RESPONSE" > /tmp/projects.md
+
+      - name: Update README
+        run: |
+          sed -i '/<!-- PROJECTS:START -->/,/<!-- PROJECTS:END -->/{
+            /<!-- PROJECTS:START -->/{
+              r /tmp/projects.md
+              a\<!-- PROJECTS:END -->
+              d
+            }
+            /<!-- PROJECTS:END -->/!d
+            /<!-- PROJECTS:END -->/d
+          }' README.md
+
+      - name: Commit changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git diff --quiet README.md || (git add README.md && git commit -m "chore: update projects" && git push)
