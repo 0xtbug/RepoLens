@@ -2,40 +2,58 @@ name: Update README with Projects
 
 on:
   schedule:
-    - cron: '0 */12 * * *' # Every 12 hours
-  workflow_dispatch: # Manual trigger
+    - cron: '0 */12 * * *' # Every 12 hours (UTC)
+  workflow_dispatch:
 
 jobs:
   update-readme:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Fetch projects
         run: |
-          RESPONSE=$(curl -sf "${{ secrets.PROJECTS_API_URL }}")
-          if [ -z "$RESPONSE" ]; then
-            echo "Failed to fetch projects"
+          curl -sf "${{ secrets.PROJECTS_API_URL }}" -o /tmp/projects.md
+          if [ ! -s /tmp/projects.md ]; then
+            echo "Failed to fetch projects or empty response"
             exit 1
           fi
-          echo "$RESPONSE" > /tmp/projects.md
 
-      - name: Update README
+      - name: Ensure markers exist
         run: |
-          sed -i '/<!-- PROJECTS:START -->/,/<!-- PROJECTS:END -->/{
-            /<!-- PROJECTS:START -->/{
-              r /tmp/projects.md
-              a\<!-- PROJECTS:END -->
-              d
-            }
-            /<!-- PROJECTS:END -->/!d
-            /<!-- PROJECTS:END -->/d
-          }' README.md
+          if ! grep -q "<!-- PROJECTS:START -->" README.md; then
+            echo "<!-- PROJECTS:START -->" >> README.md
+            echo "<!-- PROJECTS:END -->" >> README.md
+          fi
 
-      - name: Commit changes
+      - name: Update README block safely
+        run: |
+          awk '
+          /<!-- PROJECTS:START -->/ {
+            print
+            while ((getline line < "/tmp/projects.md") > 0)
+              print line
+            close("/tmp/projects.md")
+            skip=1
+            next
+          }
+          /<!-- PROJECTS:END -->/ {
+            skip=0
+            print
+            next
+          }
+          !skip
+          ' README.md > README.new && mv README.new README.md
+
+      - name: Commit changes if needed
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git diff --quiet README.md || (git add README.md && git commit -m "chore: update projects" && git push)
+          git diff --quiet README.md || (
+            git add README.md
+            git commit -m "chore: update projects"
+            git push
+          )
